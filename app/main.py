@@ -16,8 +16,6 @@ app = FastAPI(
 )
 
 config = Config()
-
-# Global variables for components
 embeddings_handler = None
 chatbot = None
 
@@ -34,11 +32,8 @@ class ChatResponse(BaseModel):
 async def startup_event():
     """Initialize the application"""
     global embeddings_handler, chatbot
-    
     embeddings_handler = EmbeddingsHandler(config)
     chatbot = ChangiChatbot(config, embeddings_handler)
-    
-    # Check if we need to scrape and process data
     if not os.path.exists("data/processed.json"):
         print("No processed data found. Starting data collection...")
         await initialize_data()
@@ -47,16 +42,10 @@ async def initialize_data():
     """Scrape websites and process data"""
     scraper = WebScraper()
     documents = scraper.scrape_websites(config.WEBSITES)
-    
-    # Save raw data
     os.makedirs("data", exist_ok=True)
     with open("data/scraped_data.json", "w") as f:
         json.dump(documents, f, indent=2)
-    
-    # Process and store embeddings
     embeddings_handler.process_and_store_documents(documents)
-    
-    # Mark as processed
     with open("data/processed.json", "w") as f:
         json.dump({"status": "processed", "documents": len(documents)}, f)
 
@@ -66,32 +55,27 @@ async def chat_endpoint(request: ChatRequest):
     try:
         if not chatbot:
             raise HTTPException(status_code=500, detail="Chatbot not initialized")
-        
         result = chatbot.generate_response(request.query)
-        
+        # Use .get with defaults to defend against missing keys
         return ChatResponse(
-            response=result['response'],
-            sources=result['sources'][:request.max_sources],
-            context_used=result['context_used']
+            response=result.get('response', ''),
+            sources=result.get('sources', [])[:request.max_sources],
+            context_used=result.get('context_used', 0)
         )
-    
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {"status": "healthy", "service": "Changi Chatbot API"}
 
 @app.post("/refresh-data")
 async def refresh_data(background_tasks: BackgroundTasks):
-    """Refresh the scraped data"""
     background_tasks.add_task(initialize_data)
     return {"message": "Data refresh started in background"}
 
 @app.get("/stats")
 async def get_stats():
-    """Get system statistics"""
     if embeddings_handler:
         index_stats = embeddings_handler.index.describe_index_stats()
         return {
